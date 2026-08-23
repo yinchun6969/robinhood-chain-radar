@@ -79,7 +79,28 @@ http://127.0.0.1:8787/en
 
 Local health endpoint: `http://127.0.0.1:8787/api/health`
 
-![Architecture](assets/architecture.webp)
+## Architecture
+
+```mermaid
+flowchart LR
+    RPC[Robinhood Chain RPC] --> FS[Fast Scanner]
+    RPC --> NS[Native ETH Scanner]
+    FS --> PW[Priority Event Workers]
+    FS --> SF[Swap Filters]
+    PW --> VR[V4 Resolver]
+    PW --> TR[Token Radar]
+    SF --> TR
+    NS --> AI[Address Intel]
+    VR --> TR
+    TR --> TI[Token Intel]
+    TR --> AI
+    TI --> DB[(SQLite / Local Storage)]
+    AI --> DB
+    DB --> WEB[Dashboard /zh /en]
+    DB --> TG[Telegram Alerts]
+    ANDROID[Android Termux] --> FS
+    UBUNTU[Ubuntu systemd] --> FS
+```
 
 ## Signal semantics
 
