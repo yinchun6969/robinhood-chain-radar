@@ -45,15 +45,11 @@ sudo bash scripts/ubuntu/install.sh
 ## Language / 语言
 
 ```env
-# 中文 Telegram / 默认中文
 LANGUAGE=zh_CN
-
-# English Telegram
 # LANGUAGE=en_US
 ```
 
 Dashboard routes / 面板地址：
-
 - 中文：`http://127.0.0.1:8787/zh`
 - English: `http://127.0.0.1:8787/en`
 
@@ -78,5 +74,4 @@ Token 合约风险结果属于启发式风险提示，不等同于完整智能�
 See [SECURITY.md](SECURITY.md) and [DISCLAIMER.md](DISCLAIMER.md).
 
 ## License
-
 MIT
