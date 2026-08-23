@@ -306,6 +306,55 @@ class TokenIntelligence:
             note_map.get(risk.get("note"), risk.get("note") or "Unknown"),
         )
 
+    def analyze_token(self, token, exclude_addrs=None):
+        """Return a reusable holder + permission-risk snapshot for V1.3 Token Radar."""
+        holders = self._holder_stats(token, set(exclude_addrs or ()))
+        risk = self._contract_risk(token)
+
+        score = 0
+        if risk.get("verified") is False:
+            score += 20
+        level = risk.get("level") or "未知"
+        score += {"高": 35, "中": 20, "未知/偏高": 30, "未知": 25, "较低": 5}.get(level, 15)
+        if risk.get("proxy"):
+            score += 10
+        if risk.get("owner") and not risk.get("owner_renounced"):
+            score += 10
+        flags = set(risk.get("flags") or [])
+        if "已验证 bytecode 与当前 bytecode 不一致" in flags:
+            score += 25
+        if "黑名单" in flags or "交易开关" in flags:
+            score += 15
+
+        top1 = holders.get("top1")
+        top10 = holders.get("top10")
+        count = holders.get("holders")
+        if top1 is not None:
+            if top1 >= 50: score += 30
+            elif top1 >= 30: score += 20
+            elif top1 >= 15: score += 10
+        if top10 is not None:
+            if top10 >= 85: score += 25
+            elif top10 >= 70: score += 15
+            elif top10 >= 50: score += 8
+        if count is not None:
+            if count < 10: score += 15
+            elif count < 50: score += 8
+
+        score = max(0, min(100, int(score)))
+        risk["score"] = score
+        if score >= 70:
+            risk["band"] = "high"
+        elif score >= 40:
+            risk["band"] = "medium"
+        else:
+            risk["band"] = "lower"
+        level_en, flags_en, note_en = self._risk_text_en(risk)
+        risk["level_en"] = level_en
+        risk["flags_en"] = flags_en
+        risk["note_en"] = note_en
+        return {"holders": holders, "risk": risk}
+
     def build_liquidity_report(self, kind, pool_subject, event_usd, t0, t1,
                                block_number, v4_meta=None, current_amounts=None):
         focus, other = self._pick_focus(t0, t1)
@@ -372,7 +421,7 @@ class TokenIntelligence:
             hooks = (v4_meta.get("hooks") or ZERO).lower()
             fee_text = "未知" if zh else "Unknown"
             try:
-                fee_text = f"{int(fee)/10000:.3f}%".rstrip("0").rstrip(".") + "%"
+                fee_text = f"{int(fee)/10000:.4f}".rstrip("0").rstrip(".") + "%"
             except Exception:
                 pass
             hook_text = ("无" if zh else "None") if hooks in {ZERO, "0x0", ""} else hooks

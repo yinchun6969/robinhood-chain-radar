@@ -11,6 +11,7 @@ from collections import deque
 from pathlib import Path
 from address_intel import AddressIntel
 from token_intel import TokenIntelligence
+from token_radar import TokenRadar
 from dataclasses import dataclass
 from typing import Optional, Dict, Tuple, List
 
@@ -190,12 +191,17 @@ START_BACKFILL_BLOCKS = int(os.getenv("START_BACKFILL_BLOCKS", "20"))
 CONFIRMATIONS = int(os.getenv("CONFIRMATIONS", "0"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-RADAR_VERSION = "1.2.5"
+RADAR_VERSION = "1.3.0"
 INTEL_CORRELATION_WINDOW_MIN = int(os.getenv("INTEL_CORRELATION_WINDOW_MIN", "60"))
 FRESH_WALLET_MAX_TX_COUNT = int(os.getenv("FRESH_WALLET_MAX_TX_COUNT", "3"))
 INTEL_BRIDGE_MIN_USD = float(os.getenv("INTEL_BRIDGE_MIN_USD", "100000"))
 INTEL_LP_MIN_USD = float(os.getenv("INTEL_LP_MIN_USD", "100000"))
 INTEL_SWAP_MIN_USD = float(os.getenv("INTEL_SWAP_MIN_USD", "100000"))
+TOKEN_RADAR_MIN_EVENT_USD = float(os.getenv("TOKEN_RADAR_MIN_EVENT_USD", "100000"))
+TOKEN_SIGNAL_MIN_SCORE = int(os.getenv("TOKEN_SIGNAL_MIN_SCORE", "55"))
+TOKEN_CORRELATION_WINDOW_MIN = int(os.getenv("TOKEN_CORRELATION_WINDOW_MIN", "180"))
+TOKEN_DEEP_SCAN_TTL_SEC = int(os.getenv("TOKEN_DEEP_SCAN_TTL_SEC", "600"))
+TOKEN_SIGNAL_COOLDOWN_MIN = int(os.getenv("TOKEN_SIGNAL_COOLDOWN_MIN", "30"))
 
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -575,6 +581,18 @@ def get_token(addr: str) -> Token:
     token_cache[a] = t
     return t
 
+# V1.3.0 token-centric capital radar. Event handlers enqueue compact records;
+# a dedicated background worker performs holder/risk analysis and correlation.
+token_radar = TokenRadar(
+    db=db, token_intel=token_intel, token_getter=get_token, telegram=telegram,
+    save_alert=save_alert, explorer=EXPLORER, weth=WETH, usdg=USDG,
+    language=LANGUAGE, min_event_usd=TOKEN_RADAR_MIN_EVENT_USD,
+    signal_min_score=TOKEN_SIGNAL_MIN_SCORE,
+    correlation_window_min=TOKEN_CORRELATION_WINDOW_MIN,
+    deep_scan_ttl_sec=TOKEN_DEEP_SCAN_TTL_SEC,
+    signal_cooldown_min=TOKEN_SIGNAL_COOLDOWN_MIN,
+)
+
 def get_eth_price() -> Optional[float]:
     key = "__eth__"
     now = time.time()
@@ -914,7 +932,13 @@ def process_v4_modify_liquidity(lg):
     intel.record(actor,"liquidity","Uniswap V4",action,usd,pair,pool_id,
                  lg["transactionHash"],block_num,
                  {"new_pool":bool(new_pool),"event_sender":sender,
-                  "tick_lower":tick_lower,"tick_upper":tick_upper,"current_tick":current_tick})
+                  "tick_lower":tick_lower,"tick_upper":tick_upper,"current_tick":current_tick,
+                  "token0":t0.address,"token1":t1.address})
+    token_radar.observe_liquidity(
+        "v4", action, pool_id, usd, t0, t1, actor, lg["transactionHash"], block_num,
+        new_pool=bool(new_pool), metadata={"tick_lower":tick_lower,"tick_upper":tick_upper,
+                                          "current_tick":current_tick,"hooks":pool.get("hooks")}
+    )
     if usd<ALERT_USD:
         return
     key=f"v4liq:{lg['transactionHash']}:{pool_id}:{action}:{tick_lower}:{tick_upper}"
@@ -1134,8 +1158,10 @@ def process_v2_mint(lg):
     event_sender=topic_addr(lg["topics"][1]) if len(lg.get("topics",[]))>1 else ""
     actor=intel.actor_for_tx(txh,event_sender); pair=f"{t0.symbol}/{t1.symbol}"
     new_pool=intel.pool_is_new(pool,block)
-    intel.record(actor,"liquidity","Uniswap V2","NEW POOL ADD" if new_pool else "ADD",usd,pair,pool,txh,block,{"new_pool":new_pool,"event_sender":event_sender,"pricing":src})
-    if usd>=ALERT_USD: liquidity_alert("v2","ADD",pool,txh,usd,t0,t1,a0,a1,src,block)
+    action="NEW POOL ADD" if new_pool else "ADD"
+    intel.record(actor,"liquidity","Uniswap V2",action,usd,pair,pool,txh,block,{"new_pool":new_pool,"event_sender":event_sender,"pricing":src,"token0":t0.address,"token1":t1.address})
+    token_radar.observe_liquidity("v2",action,pool,usd,t0,t1,actor,txh,block,new_pool=new_pool,metadata={"pricing":src})
+    if usd>=ALERT_USD: liquidity_alert("v2",action,pool,txh,usd,t0,t1,a0,a1,src,block)
 def process_v2_burn(lg):
     pool=norm(lg["address"])
     if get_pool_kind(pool)!="v2": return
@@ -1145,7 +1171,8 @@ def process_v2_burn(lg):
     block=safe_hex_int(lg["blockNumber"]); txh=lg["transactionHash"]
     event_sender=topic_addr(lg["topics"][1]) if len(lg.get("topics",[]))>1 else ""
     actor=intel.actor_for_tx(txh,event_sender)
-    intel.record(actor,"liquidity","Uniswap V2","REMOVE",usd,f"{t0.symbol}/{t1.symbol}",pool,txh,block,{"event_sender":event_sender,"pricing":src})
+    intel.record(actor,"liquidity","Uniswap V2","REMOVE",usd,f"{t0.symbol}/{t1.symbol}",pool,txh,block,{"event_sender":event_sender,"pricing":src,"token0":t0.address,"token1":t1.address})
+    token_radar.observe_liquidity("v2","REMOVE",pool,usd,t0,t1,actor,txh,block,metadata={"pricing":src})
     if usd>=ALERT_USD: liquidity_alert("v2","REMOVE",pool,txh,usd,t0,t1,a0,a1,src,block)
 def process_v3_mint(lg):
     pool=norm(lg["address"])
@@ -1156,8 +1183,10 @@ def process_v3_mint(lg):
     block=safe_hex_int(lg["blockNumber"]); txh=lg["transactionHash"]
     event_sender=data_addr(lg["data"],0); actor=intel.actor_for_tx(txh,event_sender)
     pair=f"{t0.symbol}/{t1.symbol}"; new_pool=intel.pool_is_new(pool,block)
-    intel.record(actor,"liquidity","Uniswap V3","NEW POOL ADD" if new_pool else "ADD",usd,pair,pool,txh,block,{"new_pool":new_pool,"event_sender":event_sender,"pricing":src})
-    if usd>=ALERT_USD: liquidity_alert("v3","ADD",pool,txh,usd,t0,t1,a0,a1,src,block)
+    action="NEW POOL ADD" if new_pool else "ADD"
+    intel.record(actor,"liquidity","Uniswap V3",action,usd,pair,pool,txh,block,{"new_pool":new_pool,"event_sender":event_sender,"pricing":src,"token0":t0.address,"token1":t1.address})
+    token_radar.observe_liquidity("v3",action,pool,usd,t0,t1,actor,txh,block,new_pool=new_pool,metadata={"pricing":src})
+    if usd>=ALERT_USD: liquidity_alert("v3",action,pool,txh,usd,t0,t1,a0,a1,src,block)
 def process_v3_burn(lg):
     pool=norm(lg["address"])
     if get_pool_kind(pool)!="v3": return
@@ -1167,7 +1196,8 @@ def process_v3_burn(lg):
     block=safe_hex_int(lg["blockNumber"]); txh=lg["transactionHash"]
     event_sender=topic_addr(lg["topics"][1]) if len(lg.get("topics",[]))>1 else ""
     actor=intel.actor_for_tx(txh,event_sender)
-    intel.record(actor,"liquidity","Uniswap V3","REMOVE",usd,f"{t0.symbol}/{t1.symbol}",pool,txh,block,{"event_sender":event_sender,"pricing":src})
+    intel.record(actor,"liquidity","Uniswap V3","REMOVE",usd,f"{t0.symbol}/{t1.symbol}",pool,txh,block,{"event_sender":event_sender,"pricing":src,"token0":t0.address,"token1":t1.address})
+    token_radar.observe_liquidity("v3","REMOVE",pool,usd,t0,t1,actor,txh,block,metadata={"pricing":src})
     if usd>=ALERT_USD: liquidity_alert("v3","REMOVE",pool,txh,usd,t0,t1,a0,a1,src,block)
 def process_pool_created(lg, version: str):
     addr = norm(lg["address"])
@@ -1222,7 +1252,9 @@ def process_deposit_finalized(lg):
         log.info("Bridge deposit unpriced: %s %s tx=%s", amount, token.symbol, lg["transactionHash"])
         return
     usd = amount * p[0]
-    intel.record(recipient,"bridge",bridge_name,"BRIDGE IN",usd,token.symbol,recipient,lg["transactionHash"],safe_hex_int(lg["blockNumber"]),{"token":token.address,"amount":amount})
+    block_num=safe_hex_int(lg["blockNumber"])
+    intel.record(recipient,"bridge",bridge_name,"BRIDGE IN",usd,token.symbol,recipient,lg["transactionHash"],block_num,{"token":token.address,"amount":amount})
+    token_radar.observe_bridge(token.address,token.symbol,usd,recipient,bridge_name,lg["transactionHash"],block_num,{"amount":amount})
     record_bridge_flow(recipient, usd, lg["transactionHash"])
     if usd >= ALERT_USD:
         bridge_alert(
@@ -1232,7 +1264,7 @@ def process_deposit_finalized(lg):
             token,
             amount,
             usd,
-            safe_hex_int(lg["blockNumber"]),
+            block_num,
         )
 
 
@@ -1259,7 +1291,9 @@ def process_v2_swap(lg):
     if usd is None or usd<INTEL_SWAP_MIN_USD: return
     txh=lg["transactionHash"]; block=safe_hex_int(lg["blockNumber"]); event_sender=topic_addr(lg["topics"][1]) if len(lg.get("topics",[]))>1 else ""
     actor=intel.actor_for_tx(txh,event_sender)
-    intel.record(actor,"swap","Uniswap V2","SWAP",usd,f"{t0.symbol}/{t1.symbol}",pool,txh,block,{"event_sender":event_sender,"pricing":src})
+    focus,_,idx=token_radar.focus_token(t0,t1); direction="BUY" if (raw0 if idx==0 else raw1)<0 else "SELL"
+    intel.record(actor,"swap","Uniswap V2",direction,usd,f"{t0.symbol}/{t1.symbol}",pool,txh,block,{"event_sender":event_sender,"pricing":src,"token0":t0.address,"token1":t1.address,"focus_token":focus.address})
+    token_radar.observe_swap("v2",pool,usd,t0,t1,raw0,raw1,actor,txh,block,{"pricing":src})
 
 def process_v3_swap(lg):
     pool=norm(lg["address"])
@@ -1269,7 +1303,9 @@ def process_v3_swap(lg):
     if usd is None or usd<INTEL_SWAP_MIN_USD: return
     txh=lg["transactionHash"]; block=safe_hex_int(lg["blockNumber"]); event_sender=topic_addr(lg["topics"][1]) if len(lg.get("topics",[]))>1 else ""
     actor=intel.actor_for_tx(txh,event_sender)
-    intel.record(actor,"swap","Uniswap V3","SWAP",usd,f"{t0.symbol}/{t1.symbol}",pool,txh,block,{"event_sender":event_sender,"pricing":src})
+    focus,_,idx=token_radar.focus_token(t0,t1); direction="BUY" if (raw0 if idx==0 else raw1)<0 else "SELL"
+    intel.record(actor,"swap","Uniswap V3",direction,usd,f"{t0.symbol}/{t1.symbol}",pool,txh,block,{"event_sender":event_sender,"pricing":src,"token0":t0.address,"token1":t1.address,"focus_token":focus.address})
+    token_radar.observe_swap("v3",pool,usd,t0,t1,raw0,raw1,actor,txh,block,{"pricing":src})
 
 def process_v4_swap(lg):
     if norm(lg["address"])!=V4_POOL_MANAGER: return
@@ -1300,7 +1336,10 @@ def process_v4_swap(lg):
         if vals: usd=max(vals)
     if usd is None or usd<INTEL_SWAP_MIN_USD: return
     txh=lg["transactionHash"]; actor=intel.actor_for_tx(txh,event_sender)
-    intel.record(actor,"swap","Uniswap V4","SWAP",usd,f"{t0.symbol}/{t1.symbol}",pool_id,txh,block,{"event_sender":event_sender,"pricing":"+".join(dict.fromkeys(sources)),"tick":signed_word(lg["data"],4),"fee":word(lg["data"],5)})
+    focus,_,idx=token_radar.focus_token(t0,t1); direction="BUY" if (raw0 if idx==0 else raw1)<0 else "SELL"
+    pricing="+".join(dict.fromkeys(sources))
+    intel.record(actor,"swap","Uniswap V4",direction,usd,f"{t0.symbol}/{t1.symbol}",pool_id,txh,block,{"event_sender":event_sender,"pricing":pricing,"tick":signed_word(lg["data"],4),"fee":word(lg["data"],5),"token0":t0.address,"token1":t1.address,"focus_token":focus.address})
+    token_radar.observe_swap("v4",pool_id,usd,t0,t1,raw0,raw1,actor,txh,block,{"pricing":pricing,"tick":signed_word(lg["data"],4),"fee":word(lg["data"],5)})
 
 def process_log(lg):
     try:
@@ -1471,6 +1510,10 @@ def self_test():
         "v4_position_manager": V4_POSITION_MANAGER,
         "intel_correlation_window_min": INTEL_CORRELATION_WINDOW_MIN,
         "intel_swap_min_usd": INTEL_SWAP_MIN_USD,
+        "token_radar_min_event_usd": TOKEN_RADAR_MIN_EVENT_USD,
+        "token_signal_min_score": TOKEN_SIGNAL_MIN_SCORE,
+        "token_correlation_window_min": TOKEN_CORRELATION_WINDOW_MIN,
+        "token_signal_cooldown_min": TOKEN_SIGNAL_COOLDOWN_MIN,
         "l2_gateway_router": L2_GATEWAY_ROUTER,
     }, indent=2))
 
@@ -1484,11 +1527,11 @@ if __name__ == "__main__":
             sys.exit(2)
         telegram(
             (
-                "🔔 Robinhood 链资金雷达 · 测试警报\n"
+                f"🔔 Robinhood 链资金雷达 V{RADAR_VERSION} · 测试警报\n"
                 "Telegram 推送通道正常。\n"
                 f"当前警报门槛：{fmt_usd(ALERT_USD)}"
             ) if LANGUAGE.lower().startswith("zh") else (
-                "🔔 Robinhood Chain Radar · Test Alert\n"
+                f"🔔 Robinhood Chain Radar V{RADAR_VERSION} · Test Alert\n"
                 "Telegram delivery is working.\n"
                 f"Current alert threshold: {fmt_usd(ALERT_USD)}"
             )

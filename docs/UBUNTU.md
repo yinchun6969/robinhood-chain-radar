@@ -1,1 +1,4 @@
-[中文](zh-CN/UBUNTU.md) | [English](en-US/UBUNTU.md)
+# Ubuntu
+
+- [中文部署说明](zh-CN/UBUNTU.md)
+- [English deployment guide](en-US/UBUNTU.md)

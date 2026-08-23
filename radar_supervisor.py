@@ -10,7 +10,7 @@ from pathlib import Path
 
 APP=Path(__file__).resolve().parent
 LOG=APP/'supervisor.log'
-DB=APP/'radar.db'
+DB=Path(os.getenv('DB_PATH', str(APP/'radar.db'))).expanduser()
 
 root=logging.getLogger()
 root.setLevel(logging.INFO)
@@ -27,6 +27,7 @@ import event_worker
 import swap_filter
 import v4_resolver
 import native_scanner
+import token_worker
 import dashboard
 
 EXPECTED_COMPONENTS = {
@@ -39,6 +40,7 @@ EXPECTED_COMPONENTS = {
     'swap-3': lambda stop: swap_filter.main(3,stop),
     'v4-resolver': lambda stop: v4_resolver.main(stop),
     'native-scanner': lambda stop: native_scanner.main(stop),
+    'token-radar': lambda stop: token_worker.main(stop),
     'dashboard': lambda stop: dashboard.run_server(),
 }
 
@@ -98,8 +100,8 @@ def rss_mb():
         pass
     return 0.0
 
-def expire_backlogs(d):
-    now=int(time.time())
+def expire_backlogs(d, now=None):
+    now=int(now or time.time())
 
     # Swap intelligence is realtime-first. Preserve a bounded recent window.
     cutoff=now-SWAP_MAX_AGE_MIN*60
@@ -122,19 +124,35 @@ def expire_backlogs(d):
     if cur.rowcount and cur.rowcount>0:
         metric_inc(d,'fast_expired',cur.rowcount)
 
+def maintenance_once(d, now=None):
+    """Run one bounded maintenance pass. Kept separate for offline CI tests."""
+    now=int(now or time.time())
+    expire_backlogs(d, now)
+    d.execute('''DELETE FROM raw_events WHERE status IN (3,5) AND id <
+                 COALESCE((SELECT MAX(id)-50000 FROM raw_events),0)''')
+    d.execute('''DELETE FROM swap_events WHERE status IN (3,5) AND id <
+                 COALESCE((SELECT MAX(id)-60000 FROM swap_events),0)''')
+    # Token Radar scores a rolling 24h window. Keep seven days of raw token
+    # events and thirty days of emitted signals for local forensic review.
+    d.execute("DELETE FROM token_events WHERE ts<?", (now-7*86400,))
+    d.execute("DELETE FROM token_signals WHERE ts<?", (now-30*86400,))
+    # Completed/failed queue rows are disposable; a future event re-enqueues
+    # the token. This prevents the primary-key queue from growing forever.
+    d.execute("DELETE FROM token_scan_queue WHERE status IN (2,3) AND updated_at<?", (now-7*86400,))
+    try:
+        d.commit()
+    except Exception:
+        pass
+    d.execute('PRAGMA wal_checkpoint(PASSIVE)')
+    size=DB.stat().st_size/(1024*1024) if DB.exists() else 0
+    kv(d,'maintenance_db_mb',round(size,2))
+    kv(d,'maintenance_heartbeat',now)
+
 def maintenance_loop():
     d=dbconn()
     while not stop_event.is_set():
         try:
-            expire_backlogs(d)
-            d.execute('''DELETE FROM raw_events WHERE status IN (3,5) AND id <
-                         COALESCE((SELECT MAX(id)-50000 FROM raw_events),0)''')
-            d.execute('''DELETE FROM swap_events WHERE status IN (3,5) AND id <
-                         COALESCE((SELECT MAX(id)-60000 FROM swap_events),0)''')
-            d.execute('PRAGMA wal_checkpoint(PASSIVE)')
-            size=DB.stat().st_size/(1024*1024) if DB.exists() else 0
-            kv(d,'maintenance_db_mb',round(size,2))
-            kv(d,'maintenance_heartbeat',int(time.time()))
+            maintenance_once(d)
         except Exception:
             log.exception('maintenance error')
         stop_event.wait(MAINT_INTERVAL)
@@ -174,7 +192,7 @@ def supervisor_health():
         stop_event.wait(3)
 
 def main():
-    log.info('Robinhood Chain Radar V1.2.5 supervisor starting pid=%s',os.getpid())
+    log.info('Robinhood Chain Radar V1.3.0 supervisor starting pid=%s',os.getpid())
     d=dbconn()
     fast_scanner.ensure(d)
     try:
