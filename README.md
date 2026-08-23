@@ -2,8 +2,9 @@
 
 **Robinhood Chain 实时资金雷达 / Real-time Capital Flow Intelligence**
 
-[简体中文](README.zh-CN.md) · [English](README.en-US.md)
+[简体中文](README.zh-CN.md) · [English](README.en-US.md) · [V1.2.5 Release Notes](RELEASE_NOTES_V1.2.5.md)
 
+> **Status / 状态: Public Release / 正式公开发布**  
 > Public version / 公开版: **V1.2.5**  
 > Robinhood Chain Mainnet: **Chain ID 4663**
 
@@ -76,6 +77,10 @@ Token-risk results are heuristic signals rather than a full smart-contract audit
 Token 合约风险结果属于启发式风险提示，不等同于完整智能合约审计，也不保证识别所有 Honeypot 风险。
 
 See [SECURITY.md](SECURITY.md) and [DISCLAIMER.md](DISCLAIMER.md).
+
+## Contributing / 参与贡献
+
+Issues and pull requests are welcome. / 欢迎提交 Issue 与 Pull Request。
 
 ## License
 
