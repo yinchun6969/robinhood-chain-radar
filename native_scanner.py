@@ -16,6 +16,7 @@ def kv(d, k, v):
     d.execute("INSERT OR REPLACE INTO kv(k,v) VALUES(?,?)", (k, str(v)))
 
 def desired_chunk(lag, scanner_rpc_ms):
+    # Native is lower priority than realtime logs.
     if scanner_rpc_ms > 1500:
         return 20
     if scanner_rpc_ms > 700:
@@ -44,7 +45,7 @@ def main(stop_event=None):
         d.commit()
         log.warning("Native fast-forward %s -> %s (old lag=%s keep=%s)", old, last, lag, HISTORY_WINDOW)
 
-    log.info("Native scanner start=%s head=%s", last + 1, head)
+    log.info("Native V1.2.3 start=%s head=%s", last + 1, head)
 
     while stop_event is None or not stop_event.is_set():
         try:
@@ -52,6 +53,7 @@ def main(stop_event=None):
             scanner_rpc = int(float(kv_get(d, "fast_scanner_rpc_ms", 0) or 0))
             lag = max(0, head - last)
             chunk = desired_chunk(lag, scanner_rpc)
+
             kv(d, "native_scanner_head", head)
             kv(d, "native_scanner_heartbeat", int(time.time()))
             kv(d, "native_scanner_chunk", chunk)
@@ -61,35 +63,52 @@ def main(stop_event=None):
                 time.sleep(0.8)
                 continue
 
-            start, end = last + 1, min(head, last + chunk)
+            start = last + 1
+            end = min(head, start + chunk - 1)
+            nums = list(range(start, end + 1))
             t0 = time.monotonic()
+
             try:
-                blocks = monitor.rpc.get_blocks(list(range(start, end + 1)), full=True)
+                blocks = monitor.rpc.get_blocks(nums, full=True)
             except Exception as e:
                 log.warning("Native block batch %s-%s failed: %s", start, end, e)
                 time.sleep(1.2)
                 continue
 
-            deposits=[]; tx_count=0
+            deposits = []
+            tx_count = 0
             for b in blocks:
-                if not b: continue
-                txs=b.get("transactions") or []
+                if not b:
+                    continue
+                txs = b.get("transactions") or []
                 tx_count += len(txs)
-                selected=[tx for tx in txs if str(tx.get("type","")).lower() in ("0x64","0x064")]
-                if selected: deposits.append({"number":b.get("number"),"transactions":selected})
+                selected = [
+                    tx for tx in txs
+                    if str(tx.get("type","")).lower() in ("0x64","0x064")
+                ]
+                if selected:
+                    deposits.append({"number": b.get("number"), "transactions": selected})
+
             if deposits:
                 monitor.process_native_deposits(deposits)
 
-            last=end
-            kv(d,"native_scanner_last_block",last)
-            kv(d,"native_scanner_head",head)
-            kv(d,"native_scanner_heartbeat",int(time.time()))
-            kv(d,"native_scanner_batch_ms",int((time.monotonic()-t0)*1000))
+            last = end
+            kv(d, "native_scanner_last_block", last)
+            kv(d, "native_scanner_head", head)
+            kv(d, "native_scanner_heartbeat", int(time.time()))
+            kv(d, "native_scanner_batch_ms", int((time.monotonic()-t0)*1000))
             d.commit()
-            new_lag=max(0,head-last)
-            if deposits or new_lag>500:
-                log.info("Native %s-%s tx=%s deposits=%s lag=%s chunk=%s scanner_rpc=%sms", start,end,tx_count,sum(len(x["transactions"]) for x in deposits),new_lag,chunk,scanner_rpc)
+
+            new_lag = max(0, head - last)
+            if deposits or new_lag > 500:
+                dep_count = sum(len(x["transactions"]) for x in deposits)
+                log.info(
+                    "Native %s-%s tx=%s deposits=%s lag=%s chunk=%s scanner_rpc=%sms",
+                    start, end, tx_count, dep_count, new_lag, chunk, scanner_rpc
+                )
+            # Yield to the realtime scanner / swap filters.
             time.sleep(0.08 if scanner_rpc < 700 else 0.35)
+
         except KeyboardInterrupt:
             return
         except Exception:

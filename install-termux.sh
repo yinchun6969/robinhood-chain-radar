@@ -58,5 +58,3 @@ echo "前台试跑：cd $APP_DIR && .venv/bin/python radar_supervisor.py"
 echo "后台启动：cd $APP_DIR && bash start-termux.sh"
 echo "查看日志：tail -f $APP_DIR/supervisor.log"
 echo "停止后台：cd $APP_DIR && bash stop-termux.sh"
-
-echo "Language / 语言: set LANGUAGE=zh_CN or LANGUAGE=en_US in .env"

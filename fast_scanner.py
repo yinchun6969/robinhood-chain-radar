@@ -171,7 +171,7 @@ def main(stop_event=None):
     latest = monitor.rpc.block_number()
     last = int(saved) if saved is not None else max(0, latest - monitor.START_BACKFILL_BLOCKS)
     chunk = MAX_CHUNK
-    log.info("V1.2.5 fast scanner start=%s latest=%s chunk=%s", last + 1, latest, chunk)
+    log.info("V1.2.3 fast scanner start=%s latest=%s chunk=%s", last + 1, latest, chunk)
 
     while stop_event is None or not stop_event.is_set():
         try:

@@ -1,0 +1,24 @@
+[Unit]
+Description=Robinhood Chain Radar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=robinhood-radar
+Group=robinhood-radar
+WorkingDirectory=/opt/robinhood-chain-radar
+EnvironmentFile=/opt/robinhood-chain-radar/.env
+ExecStart=/opt/robinhood-chain-radar/.venv/bin/python /opt/robinhood-chain-radar/radar_supervisor.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/robinhood-chain-radar
+
+[Install]
+WantedBy=multi-user.target
