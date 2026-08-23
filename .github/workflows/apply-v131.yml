@@ -1,7 +1,7 @@
 name: Apply V1.3.1 staged patch
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened]
 
@@ -10,12 +10,13 @@ permissions:
 
 jobs:
   apply-and-validate:
-    if: github.head_ref == 'v1.3.1-dev' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.head.ref == 'v1.3.1-dev' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout V1.3.1 development branch
+      - name: Checkout trusted same-repo V1.3.1 branch
         uses: actions/checkout@v4
         with:
+          repository: ${{ github.repository }}
           ref: v1.3.1-dev
           fetch-depth: 0
 
@@ -44,13 +45,13 @@ jobs:
       - name: Compile Python sources
         run: python -m py_compile *.py
 
-      - name: V1.3.0 static regression
+      - name: Static regression
         run: python test_static.py
 
       - name: Integration regression
         run: python test_integration.py
 
-      - name: V1.3.1 failover and LP-rug regression
+      - name: V1.3.1 RPC failover and LP-rug regression
         run: python test_v131.py
 
       - name: Validate shell scripts
