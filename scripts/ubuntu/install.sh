@@ -23,9 +23,9 @@ fi
 echo "[3/7] 安装程序..."
 mkdir -p "$APP_DIR"
 for f in \
-  monitor.py address_intel.py token_intel.py fast_scanner.py event_worker.py \
+  monitor.py address_intel.py token_intel.py token_radar.py token_worker.py fast_scanner.py event_worker.py \
   swap_filter.py v4_resolver.py native_scanner.py dashboard.py radar_supervisor.py \
-  requirements.txt .env.example; do
+  requirements.txt test_static.py test_integration.py .env.example; do
   cp "$SRC_DIR/$f" "$APP_DIR/$f"
 done
 
@@ -74,7 +74,9 @@ EOF
 systemctl daemon-reload
 systemctl enable robinhood-chain-radar.service
 
-echo "[6/7] 自检..."
+echo "[6/7] Offline + RPC self-test / 离线 + RPC 自检..."
+sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/test_static.py"
+sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/test_integration.py"
 sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/monitor.py" --self-test
 
 echo "[7/7] 启动..."

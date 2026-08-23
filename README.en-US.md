@@ -1,32 +1,26 @@
-# Robinhood Chain Radar
+# Robinhood Chain Radar V1.3.0
 
-[中文](README.zh-CN.md) | [English](README.en-US.md)
+> **Unofficial community project:** independent and not affiliated with, endorsed by, or sponsored by Robinhood. See [NOTICE.md](NOTICE.md). — English
+
+![V1.3.0](assets/release-card.webp)
 
 A real-time capital-flow radar for Robinhood Chain mainnet (Chain ID `4663`).
 
-It watches large bridge inflows, Uniswap V2/V3/V4 liquidity events and large swaps, then delivers intelligence through **Telegram + a local Web Dashboard**.
+V1.3.0 upgrades isolated $1M alerts into a **Token Early-Capital Radar** that correlates bridge inflows, large buys/sells, LP deployment/removal, wallet intelligence, holder concentration and contract-permission risk.
 
-> Current public version: **V1.2.5**
+## New in V1.3.0
 
-## Features
+- **Token capital profiles:** 24h large buys, sells, net buys, LP adds/removes/net flow.
+- **Swap direction:** target-token `BUY / SELL` instead of a generic `SWAP` label.
+- **Bridge → BUY → LP correlation:** increases priority when the same wallet completes a capital-deployment sequence inside the configured window.
+- **Three scores:** capital score, risk score and final signal score.
+- **P0 / P1 / P2:** monitoring priorities only, not trading recommendations.
+- **Holder concentration:** holder count, Top1 and Top10, excluding the active pool, V4 PoolManager and zero/dead addresses.
+- **Contract permission heuristics:** source verification, owner, proxy, mint, blacklist, pause, tax, trading switch, limits and upgrade interfaces.
+- **Dedicated Token Worker:** expensive holder/contract analysis is decoupled from realtime event workers.
+- **V1.3 Dashboard:** Token Radar default tab, `/api/token`, bilingual `/zh` and `/en`.
 
-- Real-time Robinhood Chain block / event-log scanning
-- Uniswap V2/V3/V4 add/remove liquidity monitoring
-- V4 `ModifyLiquidity` LP principal estimation
-- Adaptive V2/V3/V4 large-swap filtering
-- Canonical ETH / ERC20 bridge inflow monitoring
-- Address intelligence and `Bridge → LP` P0 capital-deployment signals
-- **Chinese / English Telegram alerts** (`LANGUAGE=zh_CN` or `en_US`)
-- **Chinese / English Dashboard** at `/zh` and `/en`
-- Token CA, holder count, Top1 and Top10 concentration
-- 24h large-LP add/remove/net-flow statistics
-- Heuristic token-contract source/permission risk scan
-- Android Supervisor / Wake Lock / Termux:Boot
-- Ubuntu systemd service for 24/7 operation
-
-## Quick Start
-
-### Android / Termux
+## Android / Termux
 
 ```bash
 pkg update
@@ -36,9 +30,7 @@ cd robinhood-chain-radar
 bash scripts/android/install-termux.sh
 ```
 
-Details: [docs/en-US/ANDROID.md](docs/en-US/ANDROID.md)
-
-### Ubuntu 22.04 / 24.04
+## Ubuntu
 
 ```bash
 git clone https://github.com/yinchun6969/robinhood-chain-radar.git
@@ -46,36 +38,20 @@ cd robinhood-chain-radar
 sudo bash scripts/ubuntu/install.sh
 ```
 
-Details: [docs/en-US/UBUNTU.md](docs/en-US/UBUNTU.md)
-
-## Configuration
+## V1.3 settings
 
 ```env
-LANGUAGE=en_US
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-ALERT_USD=1000000
-DASHBOARD_HOST=127.0.0.1
-DASHBOARD_PORT=8787
+TOKEN_RADAR_MIN_EVENT_USD=100000
+TOKEN_SIGNAL_MIN_SCORE=55
+TOKEN_CORRELATION_WINDOW_MIN=180
+TOKEN_DEEP_SCAN_TTL_SEC=600
+TOKEN_SIGNAL_COOLDOWN_MIN=30
 ```
 
-For Chinese Telegram alerts:
+## Risk boundary
 
-```env
-LANGUAGE=zh_CN
-```
+The risk score is heuristic. It does not prove a token is safe or sellable. V1.3.0 does not execute a real honeypot buy/sell simulation and never needs private keys or transaction signing.
 
-Dashboard:
+## Local health endpoint
 
-- Chinese: `http://127.0.0.1:8787/zh`
-- English: `http://127.0.0.1:8787/en`
-
-## Security Boundary
-
-This is a read-only monitoring tool. It does not need wallet private keys or seed phrases and does not submit transactions. Token-risk output is heuristic and is not a full security audit or honeypot buy/sell simulation.
-
-See [SECURITY.md](SECURITY.md) and [DISCLAIMER.md](DISCLAIMER.md).
-
-## License
-
-MIT
+`http://127.0.0.1:8787/api/health` returns scanner, Token Radar, supervisor, block-lag and queue health without exposing the Dashboard publicly.
