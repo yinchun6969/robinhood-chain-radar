@@ -23,6 +23,14 @@ jobs:
         run: python test_static.py
       - name: Integration smoke test
         run: python test_integration.py
+      - name: V1.3.1 reliability regression
+        shell: bash
+        run: |
+          if [[ -f test_v131.py ]]; then
+            python test_v131.py
+          else
+            echo "test_v131.py not present on this revision; skip"
+          fi
       - name: Validate shell scripts
         shell: bash
         run: |
