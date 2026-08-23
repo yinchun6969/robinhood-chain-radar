@@ -50,6 +50,9 @@ def main():
     os.environ['RH_RPC_URL'] = local
 
     import radar_supervisor
+    # V1.3.1 keeps the stable V1.3 monitor core intact while the launcher owns
+    # the reliability layer. Update the shared runtime label before alerts fire.
+    radar_supervisor.monitor.RADAR_VERSION = '1.3.1'
     radar_supervisor.log.info(
         'V1.3.1 RPC failover proxy active=%s upstreams=%s',
         proxy.pool.active_label,
