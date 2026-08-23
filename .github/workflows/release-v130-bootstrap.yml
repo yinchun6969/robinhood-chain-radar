@@ -31,7 +31,10 @@ jobs:
             tar -tJf /tmp/v130-patch.tar.xz >/dev/null
             tar -xJf /tmp/v130-patch.tar.xz -C .
             rm -rf .release130b .release130 .v130
-            rm -f .github/workflows/bootstrap-v130.yml
+            # GitHub Actions tokens cannot modify workflow files in this repository.
+            # Keep workflow files unchanged here; the connected GitHub account updates them separately.
+            git restore --source=HEAD -- .github/workflows/ci.yml
+            git restore --source=HEAD -- .github/workflows/bootstrap-v130.yml
           fi
       - name: Validate staged source
         shell: bash
