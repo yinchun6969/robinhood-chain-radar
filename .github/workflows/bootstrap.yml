@@ -1,15 +1,16 @@
 name: Bootstrap bilingual source
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
 
 jobs:
   unpack:
-    if: contains(github.event.head_commit.message, '[bootstrap]')
+    if: github.event_name == 'workflow_dispatch' || github.event.issue.title == '[bootstrap] expand bilingual source'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
