@@ -17,6 +17,7 @@ MIN = float(os.getenv('LP_RUG_MIN_REMOVE_USD', '250000'))
 P0 = float(os.getenv('LP_RUG_P0_DRAIN_PCT', '50'))
 P1 = float(os.getenv('LP_RUG_P1_DRAIN_PCT', '30'))
 BASE = float(os.getenv('LP_RUG_BASELINE_MIN_USD', '500000'))
+WINDOW = max(1, int(os.getenv('LP_RUG_WINDOW_HOURS', '24'))) * 3600
 COOL = int(os.getenv('LP_RUG_COOLDOWN_MIN', '15')) * 60
 
 
@@ -50,18 +51,19 @@ def classify(usd, pct):
 
 def alert_text(level, symbol, token, pool, usd, pct, protocol, zh):
     ratio = f'{pct:.1f}%' if pct is not None else '—'
+    hours = max(1, WINDOW // 3600)
     if zh:
         return (
             f"🔴 {level} · LP 大规模撤出风险\n"
             f"代币：{symbol or 'UNKNOWN'}\nCA：{token}\n协议：{protocol}\n"
-            f"本次撤池：${usd:,.0f}\n观察基线撤出比例：{ratio}\n池：{pool}\n"
+            f"本次撤池：${usd:,.0f}\n近{hours}h观察基线撤出比例：{ratio}\n池：{pool}\n"
             "说明：比例基于 Radar 已观察到的大额 LP 净流，不代表精确 TVL；"
             "V4 金额为本金估算。"
         )
     return (
         f"🔴 {level} · Large LP Withdrawal Risk\n"
         f"Token: {symbol or 'UNKNOWN'}\nCA: {token}\nProtocol: {protocol}\n"
-        f"Removal: ${usd:,.0f}\nObserved-flow drain ratio: {ratio}\nPool: {pool}\n"
+        f"Removal: ${usd:,.0f}\nObserved-flow drain ratio ({hours}h): {ratio}\nPool: {pool}\n"
         "Note: ratio uses Radar-observed large-LP net flow, not exact TVL; "
         "V4 amounts are principal estimates."
     )
@@ -69,6 +71,20 @@ def alert_text(level, symbol, token, pool, usd, pct, protocol, zh):
 
 def _kv(d, key, value):
     d.execute('INSERT OR REPLACE INTO kv(k,v) VALUES(?,?)', (key, str(value)))
+
+
+def _rolling_baseline(d, event_id, ts, token, pool):
+    """Observed large-LP net flow before this event, inside the configured window."""
+    cutoff = int(ts or time.time()) - WINDOW
+    row = d.execute('''
+      SELECT COALESCE(SUM(CASE
+        WHEN UPPER(action)='ADD' THEN COALESCE(usd,0)
+        WHEN UPPER(action)='REMOVE' THEN -COALESCE(usd,0)
+        ELSE 0 END),0)
+      FROM token_events
+      WHERE event_type='liquidity' AND token=? AND pool=? AND id<? AND ts>=?
+    ''', (token, pool, int(event_id), cutoff)).fetchone()
+    return max(0.0, float((row or [0])[0] or 0))
 
 
 def _process_row(d, row, allow_alert):
@@ -86,13 +102,13 @@ def _process_row(d, row, allow_alert):
         (pool, token),
     ).fetchone() or (0, 0, 0)
     add, rem, net = map(float, cur)
-    baseline = net
     pct = None
 
     if action == 'ADD':
         add += usd
         net += usd
     else:
+        baseline = _rolling_baseline(d, eid, ts, token, pool)
         if baseline >= BASE and usd > 0:
             pct = usd / baseline * 100.0
         rem += usd
@@ -122,7 +138,7 @@ def _process_row(d, row, allow_alert):
             monitor.save_alert(
                 level, 'lp-rug', protocol or 'AMM', 'REMOVE', usd,
                 symbol or '', token, txh or '', int(block or 0),
-                f'pool={pool}; observed_drain_pct={pct}',
+                f'pool={pool}; observed_drain_pct={pct}; window_hours={WINDOW//3600}',
             )
             monitor.telegram(alert_text(
                 level, symbol, token, pool, usd, pct, protocol or 'AMM',
@@ -136,8 +152,8 @@ def run(stop_event=None):
     d.execute('PRAGMA journal_mode=WAL')
     ensure(d)
 
-    # Upgrade safety: build the initial observed-flow baseline from retained
-    # historical token events, but never replay historical withdrawals to TG.
+    # Upgrade safety: build state from retained historical events, but never
+    # replay historical withdrawals into Telegram after an upgrade.
     init = d.execute("SELECT v FROM kv WHERE k='lp_rug_initialized'").fetchone()
     if not init:
         last = 0
