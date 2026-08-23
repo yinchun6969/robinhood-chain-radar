@@ -22,6 +22,7 @@ Robinhood Chain Radar 是一套只读的 Robinhood Chain 链上资金监控系�
 - Android Termux and Ubuntu deployment / Android Termux 与 Ubuntu 双方案
 
 ## Quick Start / 快速开始
+
 ### Android / Termux
 ```bash
 pkg update
@@ -30,6 +31,7 @@ git clone https://github.com/yinchun6969/robinhood-chain-radar.git
 cd robinhood-chain-radar
 bash scripts/android/install-termux.sh
 ```
+
 ### Ubuntu 22.04 / 24.04
 ```bash
 git clone https://github.com/yinchun6969/robinhood-chain-radar.git
