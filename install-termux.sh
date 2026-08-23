@@ -6,7 +6,8 @@ APP_DIR="${HOME}/robinhood-radar"
 FILES=(
   monitor.py address_intel.py token_intel.py token_radar.py token_worker.py
   dashboard.py fast_scanner.py event_worker.py swap_filter.py v4_resolver.py
-  native_scanner.py radar_supervisor.py requirements.txt test_static.py test_integration.py .env.example
+  native_scanner.py radar_supervisor.py launcher.py rpc_pool.py rpc_proxy.py lp_rug.py doctor.py
+  requirements.txt test_static.py test_integration.py test_v131.py .env.example
 )
 RUNTIME=(start-termux.sh stop-termux.sh status-termux.sh enable-boot.sh disable-boot.sh keepalive-job.sh)
 
@@ -14,7 +15,7 @@ echo "[1/6] Install Termux dependencies / 安装 Termux 依赖"
 pkg update -y
 pkg install -y python
 
-echo "[2/6] Install Robinhood Chain Radar V1.3.0"
+echo "[2/6] Install Robinhood Chain Radar V1.3.1"
 mkdir -p "$APP_DIR"
 for f in "${FILES[@]}"; do cp "$SRC_DIR/$f" "$APP_DIR/$f"; done
 for f in "${RUNTIME[@]}"; do cp "$SRC_DIR/$f" "$APP_DIR/$f"; chmod +x "$APP_DIR/$f"; done
@@ -41,16 +42,19 @@ for line in lines:
 p.write_text('\n'.join(out)+'\n',encoding='utf-8')
 PY
 
-echo "[5/6] Offline/static test"
+echo "[5/6] Offline/static + V1.3.1 regression"
 .venv/bin/python test_static.py
+.venv/bin/python test_integration.py
+.venv/bin/python test_v131.py
 
 echo "[6/6] RPC self-test"
 .venv/bin/python monitor.py --self-test
 
 echo
-echo "✅ Robinhood Chain Radar V1.3.0 installed / 安装完成"
+echo "✅ Robinhood Chain Radar V1.3.1 installed / 安装完成"
 echo "Config / 配置: $APP_DIR/.env"
 echo "Start / 启动: cd $APP_DIR && bash start-termux.sh"
+echo "Doctor / 自检: cd $APP_DIR && .venv/bin/python doctor.py"
 echo "Status / 状态: cd $APP_DIR && bash status-termux.sh"
 echo "ZH Dashboard: http://127.0.0.1:8787/zh"
 echo "EN Dashboard: http://127.0.0.1:8787/en"
