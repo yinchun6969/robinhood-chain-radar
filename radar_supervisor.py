@@ -28,6 +28,7 @@ import swap_filter
 import v4_resolver
 import native_scanner
 import token_worker
+import lp_rug
 import dashboard
 
 EXPECTED_COMPONENTS = {
@@ -41,6 +42,7 @@ EXPECTED_COMPONENTS = {
     'v4-resolver': lambda stop: v4_resolver.main(stop),
     'native-scanner': lambda stop: native_scanner.main(stop),
     'token-radar': lambda stop: token_worker.main(stop),
+    'lp-rug': lambda stop: lp_rug.run(stop),
     'dashboard': lambda stop: dashboard.run_server(),
 }
 
@@ -84,7 +86,7 @@ def component_wrapper(name,target):
             log.exception('component crashed: %s',name)
         with lock:
             restart_counts[name]+=1
-        time.sleep(min(10,1+restart_counts[name]))
+        stop_event.wait(min(10,1+restart_counts[name]))
 
 def spawn(name):
     t=threading.Thread(target=component_wrapper,args=(name,EXPECTED_COMPONENTS[name]),name=name,daemon=True)
@@ -103,7 +105,6 @@ def rss_mb():
 def expire_backlogs(d, now=None):
     now=int(now or time.time())
 
-    # Swap intelligence is realtime-first. Preserve a bounded recent window.
     cutoff=now-SWAP_MAX_AGE_MIN*60
     cur=d.execute("UPDATE swap_events SET status=5,decision='expired:age',claimed_at=NULL WHERE status=0 AND created_at<?",(cutoff,))
     if cur.rowcount and cur.rowcount>0:
@@ -132,13 +133,13 @@ def maintenance_once(d, now=None):
                  COALESCE((SELECT MAX(id)-50000 FROM raw_events),0)''')
     d.execute('''DELETE FROM swap_events WHERE status IN (3,5) AND id <
                  COALESCE((SELECT MAX(id)-60000 FROM swap_events),0)''')
-    # Token Radar scores a rolling 24h window. Keep seven days of raw token
-    # events and thirty days of emitted signals for local forensic review.
     d.execute("DELETE FROM token_events WHERE ts<?", (now-7*86400,))
     d.execute("DELETE FROM token_signals WHERE ts<?", (now-30*86400,))
-    # Completed/failed queue rows are disposable; a future event re-enqueues
-    # the token. This prevents the primary-key queue from growing forever.
     d.execute("DELETE FROM token_scan_queue WHERE status IN (2,3) AND updated_at<?", (now-7*86400,))
+    try:
+        d.execute("DELETE FROM lp_rug_signals WHERE ts<?", (now-30*86400,))
+    except sqlite3.OperationalError:
+        pass
     try:
         d.commit()
     except Exception:
@@ -162,8 +163,9 @@ def self_restart(d,reason):
     count=int(old[0]) if old else 0
     kv(d,'supervisor_self_restarts',count+1)
     kv(d,'supervisor_last_restart_reason',reason)
-    log.error('%s -> supervisor self-exec',reason)
-    os.execv(sys.executable,[sys.executable,str(Path(__file__).resolve())])
+    entrypoint=Path(os.getenv('RADAR_ENTRYPOINT', str(Path(__file__).resolve()))).resolve()
+    log.error('%s -> process self-exec via %s',reason,entrypoint.name)
+    os.execv(sys.executable,[sys.executable,str(entrypoint)])
 
 def supervisor_health():
     d=dbconn()
@@ -192,7 +194,7 @@ def supervisor_health():
         stop_event.wait(3)
 
 def main():
-    log.info('Robinhood Chain Radar V1.3.0 supervisor starting pid=%s',os.getpid())
+    log.info('Robinhood Chain Radar V1.3.1 supervisor starting pid=%s',os.getpid())
     d=dbconn()
     fast_scanner.ensure(d)
     try:

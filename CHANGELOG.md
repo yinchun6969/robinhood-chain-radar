@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.1
+
+- Added `doctor.py` one-command runtime diagnostics.
+- Added primary + backup RPC automatic failover through a localhost JSON-RPC proxy.
+- Added primary RPC failback after a configurable recovery interval.
+- Redacted RPC URL paths, query strings and userinfo from health/log labels.
+- Added LP Rug Radar with P0/P1 large-liquidity-removal alerts.
+- Added rolling observed-flow baseline for LP drain ratios; percentages are explicitly not exact TVL.
+- Added upgrade-safe historical LP baseline seeding without replaying old Telegram alerts.
+- Added Supervisor-managed LP Rug worker and heartbeat.
+- Fixed supervisor self-exec so RPC failover remains active after scanner/RSS-triggered restarts.
+- Updated Android / Termux and Ubuntu install + upgrade paths to run through `launcher.py`.
+- Added `test_v131.py` offline regressions for RPC failover, secret-safe endpoint labels and LP-risk semantics.
+- Added bilingual V1.3.1 documentation and configuration examples.
+
 ## 1.3.0
 
 - Added Token Early-Capital Radar.

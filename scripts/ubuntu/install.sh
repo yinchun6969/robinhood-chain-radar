@@ -20,12 +20,13 @@ if ! id "$APP_USER" >/dev/null 2>&1; then
   useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin "$APP_USER"
 fi
 
-echo "[3/7] 安装程序..."
+echo "[3/7] 安装 Robinhood Chain Radar V1.3.1..."
 mkdir -p "$APP_DIR"
 for f in \
   monitor.py address_intel.py token_intel.py token_radar.py token_worker.py fast_scanner.py event_worker.py \
   swap_filter.py v4_resolver.py native_scanner.py dashboard.py radar_supervisor.py \
-  requirements.txt test_static.py test_integration.py .env.example; do
+  launcher.py rpc_pool.py rpc_proxy.py lp_rug.py doctor.py \
+  requirements.txt test_static.py test_integration.py test_v131.py .env.example; do
   cp "$SRC_DIR/$f" "$APP_DIR/$f"
 done
 
@@ -44,7 +45,7 @@ chmod 600 "$APP_DIR/.env"
 echo "[5/7] 安装 systemd 服务..."
 cat >/etc/systemd/system/robinhood-chain-radar.service <<EOF
 [Unit]
-Description=Robinhood Chain Radar
+Description=Robinhood Chain Radar V1.3.1
 After=network-online.target
 Wants=network-online.target
 
@@ -54,7 +55,7 @@ User=$APP_USER
 Group=$APP_USER
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
-ExecStart=$APP_DIR/.venv/bin/python $APP_DIR/radar_supervisor.py
+ExecStart=$APP_DIR/.venv/bin/python $APP_DIR/launcher.py
 Restart=always
 RestartSec=5
 TimeoutStopSec=20
@@ -77,19 +78,22 @@ systemctl enable robinhood-chain-radar.service
 echo "[6/7] Offline + RPC self-test / 离线 + RPC 自检..."
 sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/test_static.py"
 sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/test_integration.py"
+sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/test_v131.py"
 sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/monitor.py" --self-test
 
 echo "[7/7] 启动..."
 systemctl restart robinhood-chain-radar.service
+sleep 2
 
 echo
-echo "✅ Ubuntu 安装完成"
+echo "✅ Ubuntu V1.3.1 安装完成"
 echo "配置：$APP_DIR/.env"
 echo "状态：systemctl status robinhood-chain-radar --no-pager"
 echo "日志：journalctl -u robinhood-chain-radar -f"
+echo "Doctor：sudo -u $APP_USER $APP_DIR/.venv/bin/python $APP_DIR/doctor.py"
 echo "本机 Dashboard：http://127.0.0.1:8787"
+echo "RPC Failover：http://127.0.0.1:18766/health"
 echo
 echo "远程查看建议使用 SSH 隧道："
 echo "ssh -L 8787:127.0.0.1:8787 user@your-vps"
-
 echo "Language / 语言: set LANGUAGE=zh_CN or LANGUAGE=en_US in .env"
