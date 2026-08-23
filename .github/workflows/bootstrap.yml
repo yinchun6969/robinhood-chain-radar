@@ -1,0 +1,37 @@
+name: Bootstrap bilingual source
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    if: contains(github.event.head_commit.message, '[bootstrap]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .bootstrap/READY
+          cat .bootstrap/payload.b64.* > /tmp/payload.b64
+          base64 -d /tmp/payload.b64 > /tmp/repo.zip
+          rm -rf /tmp/unpacked
+          mkdir -p /tmp/unpacked
+          unzip -q /tmp/repo.zip -d /tmp/unpacked
+          cp -a /tmp/unpacked/robinhood-chain-radar/. ./
+          rm -rf .bootstrap
+      - name: Commit expanded repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "release: publish V1.2.5 bilingual Android + Ubuntu source"
+          git push
