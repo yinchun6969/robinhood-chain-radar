@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -18,14 +17,12 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+      - name: Compile Python sources
+        run: python -m py_compile *.py
       - name: Static smoke test
         run: python test_static.py
-      - name: Compile Python sources
-        run: |
-          python -m py_compile \
-            monitor.py dashboard.py token_intel.py address_intel.py \
-            fast_scanner.py event_worker.py swap_filter.py v4_resolver.py \
-            native_scanner.py radar_supervisor.py
+      - name: Integration smoke test
+        run: python test_integration.py
       - name: Validate shell scripts
         shell: bash
         run: |
